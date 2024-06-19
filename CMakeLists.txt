@@ -1,12 +1,19 @@
 cmake_minimum_required(VERSION 3.5)
 project(vulkan_viewer LANGUAGES C)
 
-find_package(SDL2 REQUIRED)
 find_package(Vulkan REQUIRED)
+find_package(SDL2 REQUIRED)
 
-add_executable(vulkan_viewer main.c)
+add_executable(vulkan_viewer src/main.c
+    include/Application.h
+    include/base.h
 
-target_link_libraries(vulkan_viewer PRIVATE SDL2::SDL2 SDL2::SDL2main Vulkan::Vulkan)
+    src/Application.c
+    src/base.c
+)
+
+target_include_directories(vulkan_viewer PRIVATE include)
+target_link_libraries(vulkan_viewer PRIVATE Vulkan::Vulkan SDL2::SDL2 SDL2::SDL2main)
 
 include(GNUInstallDirs)
 install(TARGETS vulkan_viewer
