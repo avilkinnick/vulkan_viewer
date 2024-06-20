@@ -10,14 +10,18 @@
 typedef struct Application
 {
     SDL_Window*    pWindow;
+    uint32_t       availableInstanceLayerCount;
+    char**         ppAvailableInstanceLayers;
+    uint32_t       availableInstanceExtensionCount;
+    char**         ppAvailableInstanceExtensions;
+    uint32_t       requiredInstanceLayerCount;
+    const char*    ppRequiredInstanceLayers[1];
+    uint32_t       requiredInstanceExtensionCount;
+    char**         ppRequiredInstanceExtensions;
     VkInstance     instance;
 } Application;
 
 Result createApplication(Application* pApplication);
-
-Result createWindow(SDL_Window** ppWindow);
-
-Result createInstance(VkInstance* pInstance);
 
 void destroyApplication(Application* pApplication);
 

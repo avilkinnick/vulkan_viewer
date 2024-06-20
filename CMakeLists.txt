@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(vulkan_viewer LANGUAGES C)
+project(vulkan_viewer)
 
 find_package(Vulkan REQUIRED)
 find_package(SDL2 REQUIRED)
