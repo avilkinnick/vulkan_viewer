@@ -14,13 +14,29 @@ static VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
     const VkDebugUtilsMessengerCallbackDataEXT*    pCallbackData,
     void*                                          pUserData);
 
-static Result createInstance(Application* pApplication);
-
 static Result createDebugUtilsMessenger(Application* pApplication, VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo);
+
+static Result createInstance(Application* pApplication);
 
 static Result getPhysicalDevice(Application* pApplication);
 
 static Result createDevice(Application* pApplication);
+
+static Result createSurface(Application* pApplication);
+
+static Result createSwapchain(Application* pApplication);
+
+static Result getSwapchainImages(Application* pApplication);
+
+static Result createSwapchainImageViews(Application* pApplication);
+
+static Result createVertShaderModule(Application* pApplication, VkShaderModule* pModule);
+
+static Result createFragShaderModule(Application* pApplication, VkShaderModule* pModule);
+
+static Result createShaderStages(Application* pApplication, VkPipelineShaderStageCreateInfo* pStages);
+
+static Result createGraphicsPipeline(Application* pApplication);
 
 Result createApplication(Application* pApplication)
 {
@@ -29,6 +45,11 @@ Result createApplication(Application* pApplication)
     pApplication->debugUtilsMessenger = NULL;
     pApplication->physicalDevice = NULL;
     pApplication->device = NULL;
+    pApplication->surface = NULL;
+    pApplication->swapchain = NULL;
+    pApplication->pSwapchainImages = NULL;
+    pApplication->pSwapchainImageViews = NULL;
+    pApplication->pipeline = NULL;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
     {
@@ -51,21 +72,91 @@ Result createApplication(Application* pApplication)
 
     if (getPhysicalDevice(pApplication) != SUCCESS)
     {
-        printError("Failed to get Vulkan physical device!");
+        printError("Failed to get physical device!");
         destroyApplication(pApplication);
         return FAIL;
     }
 
     if (createDevice(pApplication) != SUCCESS)
     {
-        printError("Failed to create Vulkan device!");
+        printError("Failed to create device!");
         destroyApplication(pApplication);
         return FAIL;
     }
 
     vkGetDeviceQueue(pApplication->device, 0, 0, &pApplication->queue);
 
+    if (createSurface(pApplication) != SUCCESS)
+    {
+        printError("Failed to create surface!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    if (createSwapchain(pApplication) != SUCCESS)
+    {
+        printError("Failed to create swapchain!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    if (getSwapchainImages(pApplication) != SUCCESS)
+    {
+        printError("Failed to get swapchain images!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    if (createSwapchainImageViews(pApplication) != SUCCESS)
+    {
+        printError("Failed to create swapchain image views!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    if (createGraphicsPipeline(pApplication) != SUCCESS)
+    {
+        printError("Failed to create graphics pipeline!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
     return SUCCESS;
+}
+
+void destroyApplication(Application* pApplication)
+{
+    vkDestroyPipeline(pApplication->device, pApplication->pipeline, NULL);
+
+    if (pApplication->pSwapchainImageViews != NULL)
+    {
+        for (uint32_t i = 0; i < pApplication->swapchainImageCount; ++i)
+        {
+            vkDestroyImageView(pApplication->device, pApplication->pSwapchainImageViews[i], NULL);
+        }
+    }
+
+    free(pApplication->pSwapchainImageViews);
+
+    free(pApplication->pSwapchainImages);
+
+    vkDestroySwapchainKHR(pApplication->device, pApplication->swapchain, NULL);
+
+    vkDestroySurfaceKHR(pApplication->instance, pApplication->surface, NULL);
+
+    vkDestroyDevice(pApplication->device, NULL);
+
+    PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkDestroyDebugUtilsMessengerEXT");
+    vkDestroyDebugUtilsMessengerEXT(pApplication->instance, pApplication->debugUtilsMessenger, NULL);
+
+    vkDestroyInstance(pApplication->instance, NULL);
+
+    if (pApplication->pWindow != NULL)
+    {
+        SDL_DestroyWindow(pApplication->pWindow);
+    }
+
+    SDL_Quit();
 }
 
 Result createWindow(Application* pApplication)
@@ -92,6 +183,13 @@ VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
     }
 
     return VK_FALSE;
+}
+
+Result createDebugUtilsMessenger(Application* pApplication, VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo)
+{
+    PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkCreateDebugUtilsMessengerEXT");
+    int result = vkCreateDebugUtilsMessengerEXT(pApplication->instance, pCreateInfo, NULL, &pApplication->debugUtilsMessenger);
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
 
 Result createInstance(Application* pApplication)
@@ -196,31 +294,24 @@ Result createInstance(Application* pApplication)
     createInfo.enabledExtensionCount = requiredExtensionCount;
     createInfo.ppEnabledExtensionNames = ppRequiredExtensions;
 
-    if (vkCreateInstance(&createInfo, NULL, &pApplication->instance) != VK_SUCCESS)
-    {
-        printError("Failed to create Vulkan instance!");
-        freeInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions, &requiredExtensionCount, &ppRequiredExtensions);
-        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
-        return FAIL;
-    }
+    int result = vkCreateInstance(&createInfo, NULL, &pApplication->instance);
 
     freeInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions, &requiredExtensionCount, &ppRequiredExtensions);
     freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
 
+    if (result != VK_SUCCESS)
+    {
+        printError("Failed to create instance!");
+        return FAIL;
+    }
+
     if (createDebugUtilsMessenger(pApplication, &debugUtilsMessengerCreateInfo) != SUCCESS)
     {
-        printError("Failed to create Vulkan debug utils messenger!");
+        printError("Failed to create debug utils messenger!");
         return FAIL;
     }
 
     return SUCCESS;
-}
-
-Result createDebugUtilsMessenger(Application* pApplication, VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo)
-{
-    PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkCreateDebugUtilsMessengerEXT");
-    int result = vkCreateDebugUtilsMessengerEXT(pApplication->instance, pCreateInfo, NULL, &pApplication->debugUtilsMessenger);
-    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
 
 Result getPhysicalDevice(Application* pApplication)
@@ -264,6 +355,20 @@ Result createDevice(Application* pApplication)
     queueCreateInfo.queueCount = 1;
     queueCreateInfo.pQueuePriorities = &priority;
 
+    uint32_t       availableExtensionCount;
+    char**         ppAvailableExtensions;
+    uint32_t       requiredExtensionCount = 1;
+    const char*    ppRequiredExtensions[1] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+
+    if (getAvailableDeviceExtensions(pApplication->physicalDevice, &availableExtensionCount, &ppAvailableExtensions) != SUCCESS)
+    {
+        printError("Failed to get available device extensions!");
+        freeDeviceExtensions(&availableExtensionCount, &ppAvailableExtensions);
+        return FAIL;
+    }
+
+    // printAvailableDeviceExtensions(availableExtensionCount, ppAvailableExtensions);
+
     VkPhysicalDeviceFeatures features;
     vkGetPhysicalDeviceFeatures(pApplication->physicalDevice, &features);
 
@@ -275,27 +380,311 @@ Result createDevice(Application* pApplication)
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.enabledLayerCount = 0;
     createInfo.ppEnabledLayerNames = NULL;
-    createInfo.enabledExtensionCount = 0;
-    createInfo.ppEnabledExtensionNames = NULL;
+    createInfo.enabledExtensionCount = requiredExtensionCount;
+    createInfo.ppEnabledExtensionNames = ppRequiredExtensions;
     createInfo.pEnabledFeatures = &features;
 
     int result = vkCreateDevice(pApplication->physicalDevice, &createInfo, NULL, &pApplication->device);
+
+    freeDeviceExtensions(&availableExtensionCount, &ppAvailableExtensions);
+
     return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
 
-void destroyApplication(Application* pApplication)
+Result createSurface(Application* pApplication)
 {
-    vkDestroyDevice(pApplication->device, NULL);
+    SDL_bool result = SDL_Vulkan_CreateSurface(pApplication->pWindow, pApplication->instance, &pApplication->surface);
+    return (result == SDL_TRUE) ? SUCCESS : FAIL;
+}
 
-    PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkDestroyDebugUtilsMessengerEXT");
-    vkDestroyDebugUtilsMessengerEXT(pApplication->instance, pApplication->debugUtilsMessenger, NULL);
+Result createSwapchain(Application* pApplication)
+{
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(pApplication->physicalDevice, pApplication->surface, &surfaceCapabilities);
 
-    vkDestroyInstance(pApplication->instance, NULL);
-
-    if (pApplication->pWindow != NULL)
+    uint32_t imageCount = surfaceCapabilities.minImageCount + 1;
+    if ((surfaceCapabilities.maxImageCount > 0) && (imageCount > surfaceCapabilities.maxImageCount))
     {
-        SDL_DestroyWindow(pApplication->pWindow);
+        imageCount = surfaceCapabilities.maxImageCount;
     }
 
-    SDL_Quit();
+    uint32_t surfaceFormatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(pApplication->physicalDevice, pApplication->surface, &surfaceFormatCount, NULL);
+
+    VkSurfaceFormatKHR* pSurfaceFormats = malloc(surfaceFormatCount * sizeof(VkSurfaceFormatKHR));
+    if (pSurfaceFormats == NULL)
+    {
+        printError("Failed to allocate %lu bytes of memory for surface formats!", surfaceFormatCount * sizeof(VkSurfaceFormatKHR));
+        return FAIL;
+    }
+
+    vkGetPhysicalDeviceSurfaceFormatsKHR(pApplication->physicalDevice, pApplication->surface, &surfaceFormatCount, pSurfaceFormats);
+
+    VkSurfaceFormatKHR surfaceFormat = pSurfaceFormats[0];
+    for (uint32_t i = 0; i < surfaceFormatCount; ++i)
+    {
+        if ((pSurfaceFormats[i].format == VK_FORMAT_B8G8R8A8_SRGB) && (pSurfaceFormats[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR))
+        {
+            surfaceFormat = pSurfaceFormats[i];
+            break;
+        }
+    }
+
+    free(pSurfaceFormats);
+
+    VkExtent2D extent;
+    if (surfaceCapabilities.currentExtent.width != UINT32_MAX)
+    {
+        extent = surfaceCapabilities.currentExtent;
+    }
+    else
+    {
+        int width, height;
+        SDL_Vulkan_GetDrawableSize(pApplication->pWindow, &width, &height);
+
+        extent.width = width;
+        extent.height = height;
+
+        if (width < surfaceCapabilities.minImageExtent.width)
+        {
+            extent.width = surfaceCapabilities.minImageExtent.width;
+        }
+        else if (width > surfaceCapabilities.maxImageExtent.width)
+        {
+            extent.width = surfaceCapabilities.maxImageExtent.width;
+        }
+
+        if (height < surfaceCapabilities.minImageExtent.height)
+        {
+            extent.height = surfaceCapabilities.minImageExtent.height;
+        }
+        else if (height > surfaceCapabilities.maxImageExtent.height)
+        {
+            extent.height = surfaceCapabilities.maxImageExtent.height;
+        }
+    }
+
+    uint32_t queueFamilyIndex = 0;
+
+    uint32_t presentModeCount;
+    vkGetPhysicalDeviceSurfacePresentModesKHR(pApplication->physicalDevice, pApplication->surface, &presentModeCount, NULL);
+
+    VkPresentModeKHR* pPresentModes = malloc(presentModeCount * sizeof(VkPresentModeKHR));
+    if (pPresentModes == NULL)
+    {
+        printError("Failed to allocate %lu bytes of memory for present modes!");
+        return FAIL;
+    }
+
+    vkGetPhysicalDeviceSurfacePresentModesKHR(pApplication->physicalDevice, pApplication->surface, &presentModeCount, pPresentModes);
+
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    for (uint32_t i = 0; i < presentModeCount; ++i)
+    {
+        if (pPresentModes[i] == VK_PRESENT_MODE_MAILBOX_KHR)
+        {
+            presentMode = VK_PRESENT_MODE_MAILBOX_KHR;
+            break;
+        }
+    }
+
+    free(pPresentModes);
+
+    VkSwapchainCreateInfoKHR createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.surface = pApplication->surface;
+    createInfo.minImageCount = imageCount;
+    createInfo.imageFormat = surfaceFormat.format;
+    createInfo.imageColorSpace = surfaceFormat.colorSpace;
+    createInfo.imageExtent = extent;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.queueFamilyIndexCount = 1;
+    createInfo.pQueueFamilyIndices = &queueFamilyIndex;
+    createInfo.preTransform = surfaceCapabilities.currentTransform;
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode = presentMode;
+    createInfo.clipped = VK_TRUE;
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+    int result = vkCreateSwapchainKHR(pApplication->device, &createInfo, NULL, &pApplication->swapchain);
+
+    pApplication->swapchainImageFormat = surfaceFormat.format;
+    pApplication->swapchainExtent = extent;
+
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
+}
+
+Result getSwapchainImages(Application* pApplication)
+{
+    vkGetSwapchainImagesKHR(pApplication->device, pApplication->swapchain, &pApplication->swapchainImageCount, NULL);
+
+    pApplication->pSwapchainImages = malloc(pApplication->swapchainImageCount * sizeof(VkImage));
+    if (pApplication->pSwapchainImages == NULL)
+    {
+        printError("Failed to allocate %lu bytes of memory for swapchain images!", pApplication->swapchainImageCount * sizeof(VkImage));
+        return FAIL;
+    }
+
+    vkGetSwapchainImagesKHR(pApplication->device, pApplication->swapchain, &pApplication->swapchainImageCount, pApplication->pSwapchainImages);
+
+    return SUCCESS;
+}
+
+Result createSwapchainImageViews(Application* pApplication)
+{
+    pApplication->pSwapchainImageViews = malloc(pApplication->swapchainImageCount * sizeof(VkImageView));
+    if (pApplication->pSwapchainImageViews == NULL)
+    {
+        printError("Failed to allocate %lu bytes of memory for swapchain image views!", pApplication->swapchainImageCount * sizeof(VkImageView));
+        return FAIL;
+    }
+
+    VkImage*        pImages = pApplication->pSwapchainImages;
+    VkImageView*    pImageViews = pApplication->pSwapchainImageViews;
+
+    for (uint32_t i = 0; i < pApplication->swapchainImageCount; ++i)
+    {
+        VkImageViewCreateInfo createInfo;
+        createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        createInfo.pNext = NULL;
+        createInfo.flags = 0;
+        createInfo.image = pImages[i];
+        createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        createInfo.format = pApplication->swapchainImageFormat;
+        createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        if (vkCreateImageView(pApplication->device, &createInfo, NULL, &pImageViews[i]) != VK_SUCCESS)
+        {
+            printError("Failed to create swapchain image view %u!", i);
+            return FAIL;
+        }
+    }
+
+    return SUCCESS;
+}
+
+Result createVertShaderModule(Application* pApplication, VkShaderModule* pModule)
+{
+
+}
+
+Result createFragShaderModule(Application* pApplication, VkShaderModule* pModule)
+{
+
+}
+
+static Result createShaderStages(Application* pApplication, VkPipelineShaderStageCreateInfo* pStages)
+{
+    VkShaderModule vertShaderModule;
+
+    pStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pStages[0].pNext = NULL;
+    pStages[0].flags = 0;
+    pStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    pStages[0].module = vertShaderModule;
+    pStages[0].pName = "main";
+    pStages[0].pSpecializationInfo = NULL;
+
+    VkShaderModule fragShaderModule;
+
+    pStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pStages[1].pNext = NULL;
+    pStages[1].flags = 0;
+    pStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    pStages[1].module = fragShaderModule;
+    pStages[1].pName = "main";
+    pStages[1].pSpecializationInfo = NULL;
+
+    return SUCCESS;
+}
+
+Result createGraphicsPipeline(Application* pApplication)
+{
+    // Сначала создаем 2 VkShaderModule
+    // Из них создаем 2 VkPipelineShaderStage
+    // Потом создаем VkPipelineDynamicState
+    // Потом создаем VkPipelineVertexInputState
+    // Потом создаем VkPipelineInputAssemblyStateCreateInfo
+    // Потом создаем VkPipelineViewportState
+    // Потом создаем VkPipelineRasterizationState
+    // Потом создаем VkPipelineMultisampleState
+    // Потом создаем VkPipelineColorBlendAttachmentState
+    // Потом создаем VkPipelineColorBlendState
+    // Потом создаем VkPipelineLayout
+    // Потом создаем VkAttachmentDescription
+    // Потом создаем VkAttachmentReference
+    // Потом создаем VkSubpassDescription
+    // Потом создаем VkRenderPass
+    // Потом создаем VkPipelineLayout
+    // Потом создаем VkGraphicsPipeline
+
+    // FILE* pFile = fopen("../shaders/vert.spv", "rb");
+    // if (pFile == NULL)
+    // {
+    //     printError("Failed to open file \"%s\" for reading!");
+    //     return FAIL;
+    // }
+
+    // fseek(pFile, 0, SEEK_END);
+
+    // size_t codeSize = ftell(pFile);
+
+    // rewind(pFile);
+
+    // char* pCode = malloc(codeSize);
+    // fread(pCode, 1, codeSize, pFile);
+
+    // fclose(pFile);
+
+    // VkShaderModuleCreateInfo vertCreateInfo;
+    // vertCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    // vertCreateInfo.pNext = NULL;
+    // vertCreateInfo.flags = 0;
+    // vertCreateInfo.codeSize = codeSize;
+    // vertCreateInfo.pCode = (const uint32_t*)pCode;
+
+    // VkShaderModule vertShaderModule;
+    // if (vkCreateShaderModule(pApplication->device, &vertCreateInfo, NULL, &vertShaderModule) != VK_SUCCESS)
+    // {
+    //     printError("Failed to create vert shader module!");
+    //     return FAIL;
+    // }
+
+    VkPipelineShaderStageCreateInfo pStages[2];
+
+    VkGraphicsPipelineCreateInfo createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.stageCount = 2;
+    createInfo.pStages;
+    // createInfo.pVertexInputState;
+    // createInfo.pInputAssemblyState;
+    // createInfo.pTessellationState;
+    // createInfo.pViewportState;
+    // createInfo.pRasterizationState;
+    // createInfo.pMultisampleState;
+    // createInfo.pDepthStencilState;
+    // createInfo.pColorBlendState;
+    // createInfo.pDynamicState;
+    // createInfo.layout;
+    // createInfo.renderPass;
+    // createInfo.subpass;
+    // createInfo.basePipelineHandle;
+    // createInfo.basePipelineIndex;
+
+    int result = vkCreateGraphicsPipelines(pApplication->device, VK_NULL_HANDLE, 1, &createInfo, NULL, &pApplication->pipeline);
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }

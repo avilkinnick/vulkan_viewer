@@ -17,6 +17,13 @@ typedef struct Application
     VkDevice                    device;
     VkQueue                     queue;
     VkSurfaceKHR                surface;
+    VkSwapchainKHR              swapchain;
+    VkFormat                    swapchainImageFormat;
+    VkExtent2D                  swapchainExtent;
+    uint32_t                    swapchainImageCount;
+    VkImage*                    pSwapchainImages;
+    VkImageView*                pSwapchainImageViews;
+    VkPipeline                  pipeline;
 } Application;
 
 Result createApplication(Application* pApplication);

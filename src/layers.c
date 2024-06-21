@@ -40,7 +40,7 @@ Result getAvailableInstanceLayers(uint32_t* pLayerCount, char*** pppLayers)
             ppLayers[i] = malloc((strlen(pLayerName) + 1) * sizeof(char));
             if (ppLayers[i] == NULL)
             {
-                printError("Failed to allocate %lu bytes of memory for name of layer \"%s\"!", (strlen(pLayerName) + 1) * sizeof(char), pLayerName);
+                printError("Failed to allocate %lu bytes of memory for name of instance layer \"%s\"!", (strlen(pLayerName) + 1) * sizeof(char), pLayerName);
                 free(pProperties);
                 return FAIL;
             }
@@ -56,7 +56,7 @@ Result getAvailableInstanceLayers(uint32_t* pLayerCount, char*** pppLayers)
 
 Result printAvailableInstanceLayers(uint32_t layerCount, char** ppLayers)
 {
-    printf("Available layers[%u]:\n", layerCount);
+    printf("Available instance layers[%u]:\n", layerCount);
     for (uint32_t i = 0; i < layerCount; ++i)
     {
         uint32_t extensionCount;
@@ -71,7 +71,7 @@ Result printAvailableInstanceLayers(uint32_t layerCount, char** ppLayers)
             VkExtensionProperties* pProperties = malloc(extensionCount * sizeof(VkExtensionProperties));
             if (pProperties == NULL)
             {
-                printError("Failed to allocate %lu bytes of memory for extensions properties of layer \"%s\"!", extensionCount * sizeof(VkExtensionProperties), ppLayers[i]);
+                printError("Failed to allocate %lu bytes of memory for extensions properties of instance layer \"%s\"!", extensionCount * sizeof(VkExtensionProperties), ppLayers[i]);
                 return FAIL;
             }
 
@@ -107,7 +107,7 @@ Result checkAvailabilityOfRequiredInstanceLayers(uint32_t availableLayerCount, c
 
         if (found != SDL_TRUE)
         {
-            printError("Layer %s is not available!", ppRequiredLayers[i]);
+            printError("Instance layer %s is not available!", ppRequiredLayers[i]);
             return FAIL;
         }
     }

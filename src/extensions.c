@@ -42,7 +42,7 @@ Result getAvailableInstanceExtensions(uint32_t* pExtensionCount, char*** pppExte
             ppExtensions[i] = malloc((strlen(pExtensionName) + 1) * sizeof(char));
             if (ppExtensions[i] == NULL)
             {
-                printError("Failed to allocate %lu bytes of memory for name of extension \"%s\"!", (strlen(pExtensionName) + 1) * sizeof(char), pExtensionName);
+                printError("Failed to allocate %lu bytes of memory for name of instance extension \"%s\"!", (strlen(pExtensionName) + 1) * sizeof(char), pExtensionName);
                 free(pProperties);
                 return FAIL;
             }
@@ -58,7 +58,7 @@ Result getAvailableInstanceExtensions(uint32_t* pExtensionCount, char*** pppExte
 
 void printAvailableInstanceExtensions(uint32_t extensionCount, char** ppExtensions)
 {
-    printf("Available extension[%u]:\n", extensionCount);
+    printf("Available instance extensions[%u]:\n", extensionCount);
     for (uint32_t i = 0; i < extensionCount; ++i)
     {
         printf("    %s\n", ppExtensions[i]);
@@ -90,7 +90,7 @@ Result getRequiredInstanceExtensions(SDL_Window* pWindow, unsigned int* pExtensi
 
 void printRequiredInstanceExtensions(unsigned int extensionCount, const char** ppExtensions)
 {
-    printf("Required extension[%u]:\n", extensionCount);
+    printf("Required instance extensions[%u]:\n", extensionCount);
     for (unsigned int i = 0; i < extensionCount; ++i)
     {
         printf("    %s\n", ppExtensions[i]);
@@ -105,6 +105,75 @@ void freeInstanceExtensions(uint32_t* pAvailableExtensionCount, char*** pppAvail
 
     *pRequiredExtensionCount = 0;
 
+    for (uint32_t i = 0; i < *pAvailableExtensionCount; ++i)
+    {
+        free((*pppAvailableExtensions)[i]);
+    }
+
+    free(*pppAvailableExtensions);
+    *pppAvailableExtensions = NULL;
+
+    *pAvailableExtensionCount = 0;
+}
+
+Result getAvailableDeviceExtensions(VkPhysicalDevice physicalDevice, uint32_t* pExtensionCount, char*** pppExtensions)
+{
+    vkEnumerateDeviceExtensionProperties(physicalDevice, NULL, pExtensionCount, NULL);
+
+    if (*pExtensionCount > 0)
+    {
+        VkExtensionProperties* pProperties = malloc(*pExtensionCount * sizeof(VkExtensionProperties));
+        if (pProperties == NULL)
+        {
+            printError("Failed to allocate %lu bytes of memory for available device extensions properties!", *pExtensionCount * sizeof(VkExtensionProperties));
+            return FAIL;
+        }
+
+        vkEnumerateDeviceExtensionProperties(physicalDevice, NULL, pExtensionCount, pProperties);
+
+        *pppExtensions = calloc(*pExtensionCount, sizeof(char*));
+        if (*pppExtensions == NULL)
+        {
+            printError("Failed to allocate %lu bytes of memory for available device extensions names!", *pExtensionCount * sizeof(char*));
+            free(pProperties);
+            return FAIL;
+        }
+
+        char** ppExtensions = *pppExtensions;
+
+        for (uint32_t i = 0; i < *pExtensionCount; ++i)
+        {
+            const char* pExtensionName = pProperties[i].extensionName;
+
+            ppExtensions[i] = malloc((strlen(pExtensionName) + 1) * sizeof(char));
+            if (ppExtensions[i] == NULL)
+            {
+                printError("Failed to allocate %lu bytes of memory for name of device extension \"%s\"!", (strlen(pExtensionName) + 1) * sizeof(char), pExtensionName);
+                free(pProperties);
+                return FAIL;
+            }
+
+            strlcpy(ppExtensions[i], pExtensionName, (strlen(pExtensionName) + 1) * sizeof(char));
+        }
+
+        free(pProperties);
+    }
+
+    return SUCCESS;
+}
+
+void printAvailableDeviceExtensions(uint32_t extensionCount, char** ppExtensions)
+{
+    printf("Available device extensions[%u]:\n", extensionCount);
+    for (uint32_t i = 0; i < extensionCount; ++i)
+    {
+        printf("    %s\n", ppExtensions[i]);
+    }
+    printf("\n");
+}
+
+void freeDeviceExtensions(uint32_t* pAvailableExtensionCount, char*** pppAvailableExtensions)
+{
     for (uint32_t i = 0; i < *pAvailableExtensionCount; ++i)
     {
         free((*pppAvailableExtensions)[i]);
