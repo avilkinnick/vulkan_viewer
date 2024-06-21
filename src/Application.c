@@ -30,11 +30,11 @@ static Result getSwapchainImages(Application* pApplication);
 
 static Result createSwapchainImageViews(Application* pApplication);
 
-static Result createVertShaderModule(Application* pApplication, VkShaderModule* pModule);
+static Result createShaderModule(Application* pApplication, const char* pShaderPath, VkShaderModule* pModule);
 
-static Result createFragShaderModule(Application* pApplication, VkShaderModule* pModule);
+static void destroyShaderModules(Application* pApplication, VkShaderModule* pModules);
 
-static Result createShaderStages(Application* pApplication, VkPipelineShaderStageCreateInfo* pStages);
+static Result createShaderStages(Application* pApplication, VkShaderModule* pModules, VkPipelineShaderStageCreateInfo* pStages);
 
 static Result createGraphicsPipeline(Application* pApplication);
 
@@ -575,19 +575,62 @@ Result createSwapchainImageViews(Application* pApplication)
     return SUCCESS;
 }
 
-Result createVertShaderModule(Application* pApplication, VkShaderModule* pModule)
+Result createShaderModule(Application* pApplication, const char* pShaderPath, VkShaderModule* pModule)
 {
+    FILE* pFile = fopen(pShaderPath, "rb");
+    if (pFile == NULL)
+    {
+        printError("Failed to open file \"%s\" for reading!", pShaderPath);
+        return FAIL;
+    }
 
+    fseek(pFile, 0, SEEK_END);
+    size_t codeSize = ftell(pFile);
+
+    char* pCode = malloc(codeSize);
+    if (pCode == NULL)
+    {
+        printError("Failed to allocate %lu bytes of memory for shader code!", codeSize);
+        fclose(pFile);
+        return FAIL;
+    }
+
+    rewind(pFile);
+    fread(pCode, 1, codeSize, pFile);
+
+    fclose(pFile);
+
+    VkShaderModuleCreateInfo createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.codeSize = codeSize;
+    createInfo.pCode = (const uint32_t*)pCode;
+
+    int result = vkCreateShaderModule(pApplication->device, &createInfo, NULL, pModule);
+
+    free(pCode);
+
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
 
-Result createFragShaderModule(Application* pApplication, VkShaderModule* pModule)
+void destroyShaderModules(Application* pApplication, VkShaderModule* pModules)
 {
-
+    for (uint32_t i = 0; i < 2; ++i)
+    {
+        vkDestroyShaderModule(pApplication->device, pModules[0], NULL);
+    }
 }
 
-static Result createShaderStages(Application* pApplication, VkPipelineShaderStageCreateInfo* pStages)
+static Result createShaderStages(Application* pApplication, VkShaderModule* pModules, VkPipelineShaderStageCreateInfo* pStages)
 {
     VkShaderModule vertShaderModule;
+    if (createShaderModule(pApplication, "../shaders/vert.spv", &vertShaderModule) != SUCCESS)
+    {
+        printError("Failed to create vertex shader module!");
+        destroyShaderModules(pApplication, pModules);
+        return FAIL;
+    }
 
     pStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     pStages[0].pNext = NULL;
@@ -598,6 +641,12 @@ static Result createShaderStages(Application* pApplication, VkPipelineShaderStag
     pStages[0].pSpecializationInfo = NULL;
 
     VkShaderModule fragShaderModule;
+    if (createShaderModule(pApplication, "../shaders/frag.spv", &fragShaderModule) != SUCCESS)
+    {
+        printError("Failed to create fragment shader module!");
+        destroyShaderModules(pApplication, pModules);
+        return FAIL;
+    }
 
     pStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     pStages[1].pNext = NULL;
@@ -612,13 +661,7 @@ static Result createShaderStages(Application* pApplication, VkPipelineShaderStag
 
 Result createGraphicsPipeline(Application* pApplication)
 {
-    // Сначала создаем 2 VkShaderModule
-    // Из них создаем 2 VkPipelineShaderStage
     // Потом создаем VkPipelineDynamicState
-    // Потом создаем VkPipelineVertexInputState
-    // Потом создаем VkPipelineInputAssemblyStateCreateInfo
-    // Потом создаем VkPipelineViewportState
-    // Потом создаем VkPipelineRasterizationState
     // Потом создаем VkPipelineMultisampleState
     // Потом создаем VkPipelineColorBlendAttachmentState
     // Потом создаем VkPipelineColorBlendState
@@ -630,53 +673,116 @@ Result createGraphicsPipeline(Application* pApplication)
     // Потом создаем VkPipelineLayout
     // Потом создаем VkGraphicsPipeline
 
-    // FILE* pFile = fopen("../shaders/vert.spv", "rb");
-    // if (pFile == NULL)
-    // {
-    //     printError("Failed to open file \"%s\" for reading!");
-    //     return FAIL;
-    // }
-
-    // fseek(pFile, 0, SEEK_END);
-
-    // size_t codeSize = ftell(pFile);
-
-    // rewind(pFile);
-
-    // char* pCode = malloc(codeSize);
-    // fread(pCode, 1, codeSize, pFile);
-
-    // fclose(pFile);
-
-    // VkShaderModuleCreateInfo vertCreateInfo;
-    // vertCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    // vertCreateInfo.pNext = NULL;
-    // vertCreateInfo.flags = 0;
-    // vertCreateInfo.codeSize = codeSize;
-    // vertCreateInfo.pCode = (const uint32_t*)pCode;
-
-    // VkShaderModule vertShaderModule;
-    // if (vkCreateShaderModule(pApplication->device, &vertCreateInfo, NULL, &vertShaderModule) != VK_SUCCESS)
-    // {
-    //     printError("Failed to create vert shader module!");
-    //     return FAIL;
-    // }
+    VkShaderModule pShaderModules[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
 
     VkPipelineShaderStageCreateInfo pStages[2];
+    if (createShaderStages(pApplication, pShaderModules, pStages) != SUCCESS)
+    {
+        printError("Failed to create shader stages!");
+        destroyShaderModules(pApplication, pShaderModules);
+        return FAIL;
+    }
+
+    VkPipelineVertexInputStateCreateInfo vertexInputState;
+    vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputState.pNext = NULL;
+    vertexInputState.flags = 0;
+    vertexInputState.vertexBindingDescriptionCount = 0;
+    vertexInputState.pVertexBindingDescriptions = NULL;
+    vertexInputState.vertexAttributeDescriptionCount = 0;
+    vertexInputState.pVertexAttributeDescriptions = NULL;
+
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState;
+    inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    inputAssemblyState.pNext = NULL;
+    inputAssemblyState.flags = 0;
+    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    inputAssemblyState.primitiveRestartEnable = VK_FALSE;
+
+    VkViewport viewport;
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = pApplication->swapchainExtent.width;
+    viewport.height = pApplication->swapchainExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    VkRect2D scissor;
+    scissor.offset.x = 0;
+    scissor.offset.y = 0;
+    scissor.extent = pApplication->swapchainExtent;
+
+    VkPipelineViewportStateCreateInfo viewportState;
+    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewportState.pNext = NULL;
+    viewportState.flags = 0;
+    viewportState.viewportCount = 1;
+    viewportState.pViewports = &viewport;
+    viewportState.scissorCount = 1;
+    viewportState.pScissors = &scissor;
+
+    VkPipelineRasterizationStateCreateInfo rasterizationState;
+    rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterizationState.pNext = NULL;
+    rasterizationState.flags = 0;
+    rasterizationState.depthClampEnable = VK_FALSE;
+    rasterizationState.rasterizerDiscardEnable = VK_FALSE;
+    rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
+    rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterizationState.depthBiasEnable = VK_FALSE;
+    rasterizationState.depthBiasConstantFactor = 0.0f;
+    rasterizationState.depthBiasClamp = 0.0f;
+    rasterizationState.depthBiasSlopeFactor = 0.0f;
+    rasterizationState.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo multisampleState;
+    multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisampleState.pNext = NULL;
+    multisampleState.flags = 0;
+    multisampleState.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    multisampleState.sampleShadingEnable = VK_FALSE;
+    multisampleState.minSampleShading = 1.0f;
+    multisampleState.pSampleMask = NULL;
+    multisampleState.alphaToCoverageEnable = VK_FALSE;
+    multisampleState.alphaToOneEnable = VK_FALSE;
+
+    VkPipelineColorBlendAttachmentState colorBlendAttachment;
+    colorBlendAttachment.blendEnable = VK_FALSE;
+    colorBlendAttachment.srcColorBlendFactor;
+    colorBlendAttachment.dstColorBlendFactor;
+    colorBlendAttachment.colorBlendOp;
+    colorBlendAttachment.srcAlphaBlendFactor;
+    colorBlendAttachment.dstAlphaBlendFactor;
+    colorBlendAttachment.alphaBlendOp;
+    colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
+                                          | VK_COLOR_COMPONENT_G_BIT
+                                          | VK_COLOR_COMPONENT_B_BIT
+                                          | VK_COLOR_COMPONENT_A_BIT;
+
+    VkPipelineColorBlendStateCreateInfo colorBlendState;
+    colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    colorBlendState.pNext = NULL;
+    colorBlendState.flags;
+    colorBlendState.logicOpEnable;
+    colorBlendState.logicOp;
+    colorBlendState.attachmentCount;
+    colorBlendState.pAttachments;
+    colorBlendState.blendConstants[4];
 
     VkGraphicsPipelineCreateInfo createInfo;
     createInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     createInfo.pNext = NULL;
     createInfo.flags = 0;
     createInfo.stageCount = 2;
-    createInfo.pStages;
-    // createInfo.pVertexInputState;
-    // createInfo.pInputAssemblyState;
-    // createInfo.pTessellationState;
-    // createInfo.pViewportState;
-    // createInfo.pRasterizationState;
-    // createInfo.pMultisampleState;
-    // createInfo.pDepthStencilState;
+    createInfo.pStages = pStages;
+    createInfo.pVertexInputState = &vertexInputState;
+    createInfo.pInputAssemblyState = &inputAssemblyState;
+    createInfo.pTessellationState = NULL;
+    createInfo.pViewportState = &viewportState;
+    createInfo.pRasterizationState = &rasterizationState;
+    createInfo.pMultisampleState = &multisampleState;
+    createInfo.pDepthStencilState = NULL;
     // createInfo.pColorBlendState;
     // createInfo.pDynamicState;
     // createInfo.layout;
@@ -686,5 +792,8 @@ Result createGraphicsPipeline(Application* pApplication)
     // createInfo.basePipelineIndex;
 
     int result = vkCreateGraphicsPipelines(pApplication->device, VK_NULL_HANDLE, 1, &createInfo, NULL, &pApplication->pipeline);
+
+    destroyShaderModules(pApplication, pShaderModules);
+
     return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
