@@ -14,6 +14,9 @@ typedef struct Application
     VkInstance                  instance;
     VkDebugUtilsMessengerEXT    debugUtilsMessenger;
     VkPhysicalDevice            physicalDevice;
+    VkDevice                    device;
+    VkQueue                     queue;
+    VkSurfaceKHR                surface;
 } Application;
 
 Result createApplication(Application* pApplication);

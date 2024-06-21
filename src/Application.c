@@ -20,12 +20,15 @@ static Result createDebugUtilsMessenger(Application* pApplication, VkDebugUtilsM
 
 static Result getPhysicalDevice(Application* pApplication);
 
+static Result createDevice(Application* pApplication);
+
 Result createApplication(Application* pApplication)
 {
     pApplication->pWindow = NULL;
     pApplication->instance = NULL;
     pApplication->debugUtilsMessenger = NULL;
     pApplication->physicalDevice = NULL;
+    pApplication->device = NULL;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
     {
@@ -48,10 +51,19 @@ Result createApplication(Application* pApplication)
 
     if (getPhysicalDevice(pApplication) != SUCCESS)
     {
-        printError("Failed to get physical device!");
+        printError("Failed to get Vulkan physical device!");
         destroyApplication(pApplication);
         return FAIL;
     }
+
+    if (createDevice(pApplication) != SUCCESS)
+    {
+        printError("Failed to create Vulkan device!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    vkGetDeviceQueue(pApplication->device, 0, 0, &pApplication->queue);
 
     return SUCCESS;
 }
@@ -71,10 +83,12 @@ VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
     if (messageSeverity < VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
     {
         printf("%s\n", pCallbackData->pMessage);
+        printf("\n");
     }
     else
     {
         fprintf(stderr, "%s\n", pCallbackData->pMessage);
+        fprintf(stderr, "\n");
     }
 
     return VK_FALSE;
@@ -108,12 +122,6 @@ Result createInstance(Application* pApplication)
                                                 | VK_DEBUG_UTILS_MESSAGE_TYPE_DEVICE_ADDRESS_BINDING_BIT_EXT;
     debugUtilsMessengerCreateInfo.pfnUserCallback = debugUtilsMessengerCallback;
     debugUtilsMessengerCreateInfo.pUserData = NULL;
-
-    // If the pEnabledValidationFeatures array contains VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
-    // then it must also contain VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT
-
-    // If the pEnabledValidationFeatures array contains VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
-    // then it must not contain VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT
 
     VkValidationFeatureEnableEXT pEnabledValidationFeatures[4] = {VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
                                                                   VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
@@ -243,8 +251,42 @@ Result getPhysicalDevice(Application* pApplication)
     return SUCCESS;
 }
 
+Result createDevice(Application* pApplication)
+{
+    float priority = 1.0f;
+
+    // TODO: change later
+    VkDeviceQueueCreateInfo queueCreateInfo;
+    queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    queueCreateInfo.pNext = NULL;
+    queueCreateInfo.flags = 0;
+    queueCreateInfo.queueFamilyIndex = 0;
+    queueCreateInfo.queueCount = 1;
+    queueCreateInfo.pQueuePriorities = &priority;
+
+    VkPhysicalDeviceFeatures features;
+    vkGetPhysicalDeviceFeatures(pApplication->physicalDevice, &features);
+
+    VkDeviceCreateInfo createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.queueCreateInfoCount = 1;
+    createInfo.pQueueCreateInfos = &queueCreateInfo;
+    createInfo.enabledLayerCount = 0;
+    createInfo.ppEnabledLayerNames = NULL;
+    createInfo.enabledExtensionCount = 0;
+    createInfo.ppEnabledExtensionNames = NULL;
+    createInfo.pEnabledFeatures = &features;
+
+    int result = vkCreateDevice(pApplication->physicalDevice, &createInfo, NULL, &pApplication->device);
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
+}
+
 void destroyApplication(Application* pApplication)
 {
+    vkDestroyDevice(pApplication->device, NULL);
+
     PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkDestroyDebugUtilsMessengerEXT");
     vkDestroyDebugUtilsMessengerEXT(pApplication->instance, pApplication->debugUtilsMessenger, NULL);
 
