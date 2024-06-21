@@ -3,17 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "extensions.h"
+#include "layers.h"
+
 static Result createWindow(Application* pApplication);
-
-static Result getAvailableInstanceLayers(Application* pApplication);
-
-static Result printAvailableInstanceLayers(Application* pApplication);
-
-static Result getAvailableInstanceExtensions(Application* pApplication);
-
-static void printAvailableInstanceExtensions(Application* pApplication);
-
-static Result checkAvailabilityOfRequiredLayers(Application* pApplication);
 
 static VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT         messageSeverity,
@@ -23,18 +16,16 @@ static VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
 
 static Result createInstance(Application* pApplication);
 
+static Result createDebugUtilsMessenger(Application* pApplication, VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo);
+
+static Result getPhysicalDevice(Application* pApplication);
+
 Result createApplication(Application* pApplication)
 {
     pApplication->pWindow = NULL;
-    pApplication->availableInstanceLayerCount = 0;
-    pApplication->ppAvailableInstanceLayers = NULL;
-    pApplication->availableInstanceExtensionCount = 0;
-    pApplication->ppAvailableInstanceExtensions = NULL;
-    pApplication->requiredInstanceLayerCount = 1;
-    pApplication->ppRequiredInstanceLayers[0] = "VK_LAYER_KHRONOS_validation";
-    pApplication->requiredInstanceExtensionCount = 0;
-    pApplication->ppRequiredInstanceExtensions = NULL;
     pApplication->instance = NULL;
+    pApplication->debugUtilsMessenger = NULL;
+    pApplication->physicalDevice = NULL;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
     {
@@ -49,32 +40,15 @@ Result createApplication(Application* pApplication)
         return FAIL;
     }
 
-    if (getAvailableInstanceLayers(pApplication) != SUCCESS)
-    {
-        printError("Failed to get available instance layers!");
-        destroyApplication(pApplication);
-        return FAIL;
-    }
-
-    if (printAvailableInstanceLayers(pApplication) != SUCCESS)
-    {
-        printError("Failed to print available instance layers!");
-        destroyApplication(pApplication);
-        return FAIL;
-    }
-
-    if (getAvailableInstanceExtensions(pApplication) != SUCCESS)
-    {
-        printError("Failed to get available instance extensions!");
-        destroyApplication(pApplication);
-        return FAIL;
-    }
-
-    printAvailableInstanceExtensions(pApplication);
-
     if (createInstance(pApplication) != SUCCESS)
     {
-        printError("Failed to create Vulkan instance!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    if (getPhysicalDevice(pApplication) != SUCCESS)
+    {
+        printError("Failed to get physical device!");
         destroyApplication(pApplication);
         return FAIL;
     }
@@ -88,154 +62,7 @@ Result createWindow(Application* pApplication)
     return (pApplication->pWindow == NULL) ? FAIL : SUCCESS;
 }
 
-Result getAvailableInstanceLayers(Application* pApplication)
-{
-    vkEnumerateInstanceLayerProperties(&pApplication->availableInstanceLayerCount, NULL);
-
-    uint32_t layerCount = pApplication->availableInstanceLayerCount;
-
-    if (layerCount > 0)
-    {
-        VkLayerProperties* pProperties = malloc(layerCount * sizeof(VkLayerProperties));
-        if (pProperties == NULL)
-        {
-            printError("Failed to allocate %lu bytes of memory for available instance layers properties!", layerCount * sizeof(VkLayerProperties));
-            return FAIL;
-        }
-
-        vkEnumerateInstanceLayerProperties(&pApplication->availableInstanceLayerCount, pProperties);
-
-        pApplication->ppAvailableInstanceLayers = calloc(layerCount, sizeof(char*));
-        if (pApplication->ppAvailableInstanceLayers == NULL)
-        {
-            printError("Failed to allocate %lu bytes of memory for available instance layers names!", layerCount * sizeof(char*));
-            free(pProperties);
-            return FAIL;
-        }
-
-        char** ppLayers = pApplication->ppAvailableInstanceLayers;
-
-        for (uint32_t i = 0; i < layerCount; ++i)
-        {
-            const char* pLayerName = pProperties[i].layerName;
-
-            ppLayers[i] = malloc((strlen(pLayerName) + 1) * sizeof(char));
-            if (ppLayers[i] == NULL)
-            {
-                printError("Failed to allocate %lu bytes of memory for name of layer \"%s\"!", (strlen(pLayerName) + 1) * sizeof(char), pLayerName);
-                free(pProperties);
-                return FAIL;
-            }
-
-            strlcpy(ppLayers[i], pLayerName, (strlen(pLayerName) + 1) * sizeof(char));
-        }
-
-        free(pProperties);
-    }
-
-    return SUCCESS;
-}
-
-static Result printAvailableInstanceLayers(Application* pApplication)
-{
-    uint32_t layerCount = pApplication->availableInstanceLayerCount;
-
-    printf("Available layers[%u]:\n", layerCount);
-    for (uint32_t i = 0; i < layerCount; ++i)
-    {
-        const char* pLayerName = pApplication->ppAvailableInstanceLayers[i];
-
-        uint32_t extensionCount;
-        vkEnumerateInstanceExtensionProperties(pLayerName, &extensionCount, NULL);
-
-        if (extensionCount == 0)
-        {
-            printf("    %s\n", pLayerName);
-        }
-        else
-        {
-            VkExtensionProperties* pProperties = malloc(extensionCount * sizeof(VkExtensionProperties));
-            if (pProperties == NULL)
-            {
-                printError("Failed to allocate %lu bytes of memory for extensions properties of layer \"%s\"!", extensionCount * sizeof(VkExtensionProperties), pLayerName);
-                return FAIL;
-            }
-
-            vkEnumerateInstanceExtensionProperties(pLayerName, &extensionCount, pProperties);
-
-            printf("    %s[%u]:\n", pLayerName, extensionCount);
-            for (uint32_t j = 0; j < extensionCount; ++j)
-            {
-                printf("        %s\n", pProperties[j].extensionName);
-            }
-
-            free(pProperties);
-        }
-    }
-    printf("\n");
-
-    return SUCCESS;
-}
-
-static Result getAvailableInstanceExtensions(Application* pApplication)
-{
-    vkEnumerateInstanceExtensionProperties(NULL, &pApplication->availableInstanceExtensionCount, NULL);
-
-    uint32_t extensionCount = pApplication->availableInstanceExtensionCount;
-
-    if (extensionCount > 0)
-    {
-        VkExtensionProperties* pProperties = malloc(extensionCount * sizeof(VkExtensionProperties));
-        if (pProperties == NULL)
-        {
-            printError("Failed to allocate %lu bytes of memory for available instance extensions properties!", extensionCount * sizeof(VkExtensionProperties));
-            return FAIL;
-        }
-
-        vkEnumerateInstanceExtensionProperties(NULL, &pApplication->availableInstanceExtensionCount, pProperties);
-
-        pApplication->ppAvailableInstanceExtensions = calloc(extensionCount, sizeof(char*));
-        if (pApplication->ppAvailableInstanceExtensions == NULL)
-        {
-            printError("Failed to allocate %lu bytes of memory for available instance extensions names!", extensionCount * sizeof(char*));
-            free(pProperties);
-            return FAIL;
-        }
-
-        char** ppExtensions = pApplication->ppAvailableInstanceExtensions;
-
-        for (uint32_t i = 0; i < extensionCount; ++i)
-        {
-            const char* pExtensionName = pProperties[i].extensionName;
-
-            ppExtensions[i] = malloc((strlen(pExtensionName) + 1) * sizeof(char));
-            if (ppExtensions[i] == NULL)
-            {
-                printError("Failed to allocate %lu bytes of memory for name of extension \"%s\"!", (strlen(pExtensionName) + 1) * sizeof(char), pExtensionName);
-                free(pProperties);
-                return FAIL;
-            }
-
-            strlcpy(ppExtensions[i], pExtensionName, (strlen(pExtensionName) + 1) * sizeof(char));
-        }
-
-        free(pProperties);
-    }
-
-    return SUCCESS;
-}
-
-static void printAvailableInstanceExtensions(Application* pApplication)
-{
-    printf("Available extension[%u]:\n", pApplication->availableInstanceExtensionCount);
-    for (uint32_t i = 0; i < pApplication->availableInstanceExtensionCount; ++i)
-    {
-        printf("    %s\n", pApplication->ppAvailableInstanceExtensions[i]);
-    }
-    printf("\n");
-}
-
-static VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
+VKAPI_ATTR VkBool32 debugUtilsMessengerCallback(
     VkDebugUtilsMessageSeverityFlagBitsEXT         messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT                messageTypes,
     const VkDebugUtilsMessengerCallbackDataEXT*    pCallbackData,
@@ -288,10 +115,10 @@ Result createInstance(Application* pApplication)
     // If the pEnabledValidationFeatures array contains VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT,
     // then it must not contain VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT
 
-    const VkValidationFeatureEnableEXT pEnabledValidationFeatures[4] = {VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
-                                                                       VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
-                                                                       VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
-                                                                       VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
+    VkValidationFeatureEnableEXT pEnabledValidationFeatures[4] = {VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_EXT,
+                                                                  VK_VALIDATION_FEATURE_ENABLE_GPU_ASSISTED_RESERVE_BINDING_SLOT_EXT,
+                                                                  VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT,
+                                                                  VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT};
 
     VkValidationFeaturesEXT validationFeatures;
     validationFeatures.sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
@@ -301,67 +128,127 @@ Result createInstance(Application* pApplication)
     validationFeatures.disabledValidationFeatureCount = 0;
     validationFeatures.pDisabledValidationFeatures = NULL;
 
-    // If the pNext chain of VkInstanceCreateInfo includes a VkDebugUtilsMessengerCreateInfoEXT structure,
-    // the list of enabled extensions in ppEnabledExtensionNames must contain VK_EXT_debug_utils
+    uint32_t        availableLayerCount = 0;
+    char**          ppAvailableLayers = NULL;
+    uint32_t        availableExtensionCount = 0;
+    char**          ppAvailableExtensions = NULL;
+    uint32_t        requiredLayerCount = 1;
+    const char*     ppRequiredLayers[1] = {"VK_LAYER_KHRONOS_validation"};
+    unsigned int    requiredExtensionCount = 0;
+    const char**    ppRequiredExtensions = NULL;
 
-    // If flags has the VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR bit set,
-    // the list of enabled extensions in ppEnabledExtensionNames must contain VK_KHR_portability_enumeration
+    if (getAvailableInstanceLayers(&availableLayerCount, &ppAvailableLayers) != SUCCESS)
+    {
+        printError("Failed to get available instance layers!");
+        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+        return FAIL;
+    }
 
-    // Each pNext member of any structure (including this one) in the pNext chain must be either NULL or a pointer to a valid
-    // instance of VkDebugReportCallbackCreateInfoEXT, VkDebugUtilsMessengerCreateInfoEXT, VkDirectDriverLoadingListLUNARG,
-    // VkExportMetalObjectCreateInfoEXT, VkLayerSettingsCreateInfoEXT, VkValidationFeaturesEXT, or VkValidationFlagsEXT
+    if (printAvailableInstanceLayers(availableLayerCount, ppAvailableLayers) != SUCCESS)
+    {
+        printError("Failed to print available instance layers!");
+        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+        return FAIL;
+    }
 
-    // The sType value of each struct in the pNext chain must be unique, with the exception of structures of type
-    // VkDebugUtilsMessengerCreateInfoEXT, VkExportMetalObjectCreateInfoEXT, or VkLayerSettingsCreateInfoEXT
+    if (checkAvailabilityOfRequiredInstanceLayers(availableLayerCount, ppAvailableLayers, requiredLayerCount, ppRequiredLayers) != SUCCESS)
+    {
+        printError("Some of required layers are not available!");
+        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+        return FAIL;
+    }
+
+    if (getAvailableInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions) != SUCCESS)
+    {
+        printError("Failed to get available instance extensions!");
+        freeInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions, &requiredExtensionCount, &ppRequiredExtensions);
+        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+        return FAIL;
+    }
+
+    printAvailableInstanceExtensions(availableExtensionCount, ppAvailableExtensions);
+
+    if (getRequiredInstanceExtensions(pApplication->pWindow, &requiredExtensionCount, &ppRequiredExtensions) != SUCCESS)
+    {
+        printError("Failed to get required extensions!");
+        freeInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions, &requiredExtensionCount, &ppRequiredExtensions);
+        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+        return FAIL;
+    }
+
+    printRequiredInstanceExtensions(requiredExtensionCount, ppRequiredExtensions);
 
     VkInstanceCreateInfo createInfo;
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pNext = &validationFeatures;
     createInfo.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     createInfo.pApplicationInfo = &applicationInfo;
-    createInfo.enabledLayerCount = 0;
-    createInfo.ppEnabledLayerNames = NULL;
-    createInfo.enabledExtensionCount = 0;
-    createInfo.ppEnabledExtensionNames = NULL;
+    createInfo.enabledLayerCount = requiredLayerCount;
+    createInfo.ppEnabledLayerNames = ppRequiredLayers;
+    createInfo.enabledExtensionCount = requiredExtensionCount;
+    createInfo.ppEnabledExtensionNames = ppRequiredExtensions;
 
-    int result = vkCreateInstance(&createInfo, NULL, &pApplication->instance);
+    if (vkCreateInstance(&createInfo, NULL, &pApplication->instance) != VK_SUCCESS)
+    {
+        printError("Failed to create Vulkan instance!");
+        freeInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions, &requiredExtensionCount, &ppRequiredExtensions);
+        freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+        return FAIL;
+    }
 
+    freeInstanceExtensions(&availableExtensionCount, &ppAvailableExtensions, &requiredExtensionCount, &ppRequiredExtensions);
+    freeInstanceLayers(&availableLayerCount, &ppAvailableLayers);
+
+    if (createDebugUtilsMessenger(pApplication, &debugUtilsMessengerCreateInfo) != SUCCESS)
+    {
+        printError("Failed to create Vulkan debug utils messenger!");
+        return FAIL;
+    }
+
+    return SUCCESS;
+}
+
+Result createDebugUtilsMessenger(Application* pApplication, VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo)
+{
+    PFN_vkCreateDebugUtilsMessengerEXT vkCreateDebugUtilsMessengerEXT = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkCreateDebugUtilsMessengerEXT");
+    int result = vkCreateDebugUtilsMessengerEXT(pApplication->instance, pCreateInfo, NULL, &pApplication->debugUtilsMessenger);
     return (result == VK_SUCCESS) ? SUCCESS : FAIL;
+}
+
+Result getPhysicalDevice(Application* pApplication)
+{
+    uint32_t physicalDeviceCount;
+    vkEnumeratePhysicalDevices(pApplication->instance, &physicalDeviceCount, NULL);
+
+    if (physicalDeviceCount < 1)
+    {
+        printError("There are no physical devices!");
+        return FAIL;
+    }
+
+    VkPhysicalDevice* pPhysicalDevices = malloc(physicalDeviceCount * sizeof(VkPhysicalDevice));
+    if (pPhysicalDevices == NULL)
+    {
+        printError("Failed to allocate %lu bytes of memory for physical devices!", physicalDeviceCount * sizeof(VkPhysicalDevice));
+        return FAIL;
+    }
+
+    vkEnumeratePhysicalDevices(pApplication->instance, &physicalDeviceCount, pPhysicalDevices);
+
+    // TODO: change later
+    pApplication->physicalDevice = pPhysicalDevices[0];
+
+    free(pPhysicalDevices);
+
+    return SUCCESS;
 }
 
 void destroyApplication(Application* pApplication)
 {
+    PFN_vkDestroyDebugUtilsMessengerEXT vkDestroyDebugUtilsMessengerEXT = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(pApplication->instance, "vkDestroyDebugUtilsMessengerEXT");
+    vkDestroyDebugUtilsMessengerEXT(pApplication->instance, pApplication->debugUtilsMessenger, NULL);
+
     vkDestroyInstance(pApplication->instance, NULL);
-
-    if (pApplication->ppRequiredInstanceExtensions != NULL)
-    {
-        for (uint32_t i = 0; i < pApplication->requiredInstanceExtensionCount; ++i)
-        {
-            free(pApplication->ppRequiredInstanceExtensions[i]);
-        }
-
-        free(pApplication->ppRequiredInstanceExtensions);
-    }
-
-    if (pApplication->ppAvailableInstanceExtensions != NULL)
-    {
-        for (uint32_t i = 0; i < pApplication->availableInstanceExtensionCount; ++i)
-        {
-            free(pApplication->ppAvailableInstanceExtensions[i]);
-        }
-
-        free(pApplication->ppAvailableInstanceExtensions);
-    }
-
-    if (pApplication->ppAvailableInstanceLayers != NULL)
-    {
-        for (uint32_t i = 0; i < pApplication->availableInstanceLayerCount; ++i)
-        {
-            free(pApplication->ppAvailableInstanceLayers[i]);
-        }
-
-        free(pApplication->ppAvailableInstanceLayers);
-    }
 
     if (pApplication->pWindow != NULL)
     {

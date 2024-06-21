@@ -7,9 +7,13 @@ find_package(SDL2 REQUIRED)
 add_executable(vulkan_viewer src/main.c
     include/Application.h
     include/base.h
+    include/extensions.h
+    include/layers.h
 
     src/Application.c
     src/base.c
+    src/extensions.c
+    src/layers.c
 )
 
 target_include_directories(vulkan_viewer PRIVATE include)

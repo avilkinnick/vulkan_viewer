@@ -4,21 +4,16 @@
 #include <vulkan/vulkan.h>
 
 #include <SDL.h>
+#include <SDL_vulkan.h>
 
 #include "base.h"
 
 typedef struct Application
 {
-    SDL_Window*    pWindow;
-    uint32_t       availableInstanceLayerCount;
-    char**         ppAvailableInstanceLayers;
-    uint32_t       availableInstanceExtensionCount;
-    char**         ppAvailableInstanceExtensions;
-    uint32_t       requiredInstanceLayerCount;
-    const char*    ppRequiredInstanceLayers[1];
-    uint32_t       requiredInstanceExtensionCount;
-    char**         ppRequiredInstanceExtensions;
-    VkInstance     instance;
+    SDL_Window*                 pWindow;
+    VkInstance                  instance;
+    VkDebugUtilsMessengerEXT    debugUtilsMessenger;
+    VkPhysicalDevice            physicalDevice;
 } Application;
 
 Result createApplication(Application* pApplication);
