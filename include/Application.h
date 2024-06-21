@@ -23,6 +23,8 @@ typedef struct Application
     uint32_t                    swapchainImageCount;
     VkImage*                    pSwapchainImages;
     VkImageView*                pSwapchainImageViews;
+    VkPipelineLayout            pipelineLayout;
+    VkRenderPass                renderPass;
     VkPipeline                  pipeline;
 } Application;
 

@@ -32,9 +32,9 @@ static Result createSwapchainImageViews(Application* pApplication);
 
 static Result createShaderModule(Application* pApplication, const char* pShaderPath, VkShaderModule* pModule);
 
-static void destroyShaderModules(Application* pApplication, VkShaderModule* pModules);
+static Result createPipelineLayout(Application* pApplication);
 
-static Result createShaderStages(Application* pApplication, VkShaderModule* pModules, VkPipelineShaderStageCreateInfo* pStages);
+static Result createRenderPass(Application* pApplication);
 
 static Result createGraphicsPipeline(Application* pApplication);
 
@@ -49,6 +49,8 @@ Result createApplication(Application* pApplication)
     pApplication->swapchain = NULL;
     pApplication->pSwapchainImages = NULL;
     pApplication->pSwapchainImageViews = NULL;
+    pApplication->pipelineLayout = NULL;
+    pApplication->renderPass = NULL;
     pApplication->pipeline = NULL;
 
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
@@ -114,6 +116,20 @@ Result createApplication(Application* pApplication)
         return FAIL;
     }
 
+    if (createPipelineLayout(pApplication) != SUCCESS)
+    {
+        printError("Failed to create pipeline layout!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
+    if (createRenderPass(pApplication) != SUCCESS)
+    {
+        printError("Failed to create render pass!");
+        destroyApplication(pApplication);
+        return FAIL;
+    }
+
     if (createGraphicsPipeline(pApplication) != SUCCESS)
     {
         printError("Failed to create graphics pipeline!");
@@ -127,6 +143,10 @@ Result createApplication(Application* pApplication)
 void destroyApplication(Application* pApplication)
 {
     vkDestroyPipeline(pApplication->device, pApplication->pipeline, NULL);
+
+    vkDestroyRenderPass(pApplication->device, pApplication->renderPass, NULL);
+
+    vkDestroyPipelineLayout(pApplication->device, pApplication->pipelineLayout, NULL);
 
     if (pApplication->pSwapchainImageViews != NULL)
     {
@@ -614,23 +634,83 @@ Result createShaderModule(Application* pApplication, const char* pShaderPath, Vk
     return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
 
-void destroyShaderModules(Application* pApplication, VkShaderModule* pModules)
+Result createPipelineLayout(Application* pApplication)
 {
-    for (uint32_t i = 0; i < 2; ++i)
-    {
-        vkDestroyShaderModule(pApplication->device, pModules[0], NULL);
-    }
+    VkPipelineLayoutCreateInfo createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.setLayoutCount = 0;
+    createInfo.pSetLayouts = NULL;
+    createInfo.pushConstantRangeCount = 0;
+    createInfo.pPushConstantRanges = NULL;
+
+    int result = vkCreatePipelineLayout(pApplication->device, &createInfo, NULL, &pApplication->pipelineLayout);
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
 
-static Result createShaderStages(Application* pApplication, VkShaderModule* pModules, VkPipelineShaderStageCreateInfo* pStages)
+Result createRenderPass(Application* pApplication)
+{
+    VkAttachmentDescription attachment;
+    attachment.flags = 0;
+    attachment.format = pApplication->swapchainImageFormat;
+    attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference attachmentRef;
+    attachmentRef.attachment = 0;
+    attachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass;
+    subpass.flags = 0;
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.inputAttachmentCount = 0;
+    subpass.pInputAttachments = NULL;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &attachmentRef;
+    subpass.pResolveAttachments = NULL;
+    subpass.pDepthStencilAttachment = NULL;
+    subpass.preserveAttachmentCount = 0;
+    subpass.pPreserveAttachments = NULL;
+
+    VkRenderPassCreateInfo createInfo;
+    createInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.attachmentCount = 1;
+    createInfo.pAttachments = &attachment;
+    createInfo.subpassCount = 1;
+    createInfo.pSubpasses = &subpass;
+    createInfo.dependencyCount = 0;
+    createInfo.pDependencies = NULL;
+
+    int result = vkCreateRenderPass(pApplication->device, &createInfo, NULL, &pApplication->renderPass);
+    return (result == VK_SUCCESS) ? SUCCESS : FAIL;
+}
+
+Result createGraphicsPipeline(Application* pApplication)
 {
     VkShaderModule vertShaderModule;
     if (createShaderModule(pApplication, "../shaders/vert.spv", &vertShaderModule) != SUCCESS)
     {
         printError("Failed to create vertex shader module!");
-        destroyShaderModules(pApplication, pModules);
         return FAIL;
     }
+
+    VkShaderModule fragShaderModule;
+    if (createShaderModule(pApplication, "../shaders/frag.spv", &fragShaderModule) != SUCCESS)
+    {
+        printError("Failed to create fragment shader module!");
+        vkDestroyShaderModule(pApplication->device, vertShaderModule, NULL);
+        return FAIL;
+    }
+
+    VkPipelineShaderStageCreateInfo pStages[2];
 
     pStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     pStages[0].pNext = NULL;
@@ -640,14 +720,6 @@ static Result createShaderStages(Application* pApplication, VkShaderModule* pMod
     pStages[0].pName = "main";
     pStages[0].pSpecializationInfo = NULL;
 
-    VkShaderModule fragShaderModule;
-    if (createShaderModule(pApplication, "../shaders/frag.spv", &fragShaderModule) != SUCCESS)
-    {
-        printError("Failed to create fragment shader module!");
-        destroyShaderModules(pApplication, pModules);
-        return FAIL;
-    }
-
     pStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     pStages[1].pNext = NULL;
     pStages[1].flags = 0;
@@ -655,33 +727,6 @@ static Result createShaderStages(Application* pApplication, VkShaderModule* pMod
     pStages[1].module = fragShaderModule;
     pStages[1].pName = "main";
     pStages[1].pSpecializationInfo = NULL;
-
-    return SUCCESS;
-}
-
-Result createGraphicsPipeline(Application* pApplication)
-{
-    // Потом создаем VkPipelineDynamicState
-    // Потом создаем VkPipelineMultisampleState
-    // Потом создаем VkPipelineColorBlendAttachmentState
-    // Потом создаем VkPipelineColorBlendState
-    // Потом создаем VkPipelineLayout
-    // Потом создаем VkAttachmentDescription
-    // Потом создаем VkAttachmentReference
-    // Потом создаем VkSubpassDescription
-    // Потом создаем VkRenderPass
-    // Потом создаем VkPipelineLayout
-    // Потом создаем VkGraphicsPipeline
-
-    VkShaderModule pShaderModules[2] = {VK_NULL_HANDLE, VK_NULL_HANDLE};
-
-    VkPipelineShaderStageCreateInfo pStages[2];
-    if (createShaderStages(pApplication, pShaderModules, pStages) != SUCCESS)
-    {
-        printError("Failed to create shader stages!");
-        destroyShaderModules(pApplication, pShaderModules);
-        return FAIL;
-    }
 
     VkPipelineVertexInputStateCreateInfo vertexInputState;
     vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -749,12 +794,12 @@ Result createGraphicsPipeline(Application* pApplication)
 
     VkPipelineColorBlendAttachmentState colorBlendAttachment;
     colorBlendAttachment.blendEnable = VK_FALSE;
-    colorBlendAttachment.srcColorBlendFactor;
-    colorBlendAttachment.dstColorBlendFactor;
-    colorBlendAttachment.colorBlendOp;
-    colorBlendAttachment.srcAlphaBlendFactor;
-    colorBlendAttachment.dstAlphaBlendFactor;
-    colorBlendAttachment.alphaBlendOp;
+    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT
                                           | VK_COLOR_COMPONENT_G_BIT
                                           | VK_COLOR_COMPONENT_B_BIT
@@ -763,12 +808,24 @@ Result createGraphicsPipeline(Application* pApplication)
     VkPipelineColorBlendStateCreateInfo colorBlendState;
     colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlendState.pNext = NULL;
-    colorBlendState.flags;
-    colorBlendState.logicOpEnable;
-    colorBlendState.logicOp;
-    colorBlendState.attachmentCount;
-    colorBlendState.pAttachments;
-    colorBlendState.blendConstants[4];
+    colorBlendState.flags = 0;
+    colorBlendState.logicOpEnable = VK_FALSE;
+    colorBlendState.logicOp = VK_LOGIC_OP_COPY;
+    colorBlendState.attachmentCount = 1;
+    colorBlendState.pAttachments = &colorBlendAttachment;
+    colorBlendState.blendConstants[0] = 0.0f;
+    colorBlendState.blendConstants[1] = 0.0f;
+    colorBlendState.blendConstants[2] = 0.0f;
+    colorBlendState.blendConstants[3] = 0.0f;
+
+    VkDynamicState pDynamicStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+
+    VkPipelineDynamicStateCreateInfo dynamicState;
+    dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamicState.pNext = NULL;
+    dynamicState.flags = 0;
+    dynamicState.dynamicStateCount = 2;
+    dynamicState.pDynamicStates = pDynamicStates;
 
     VkGraphicsPipelineCreateInfo createInfo;
     createInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -783,17 +840,18 @@ Result createGraphicsPipeline(Application* pApplication)
     createInfo.pRasterizationState = &rasterizationState;
     createInfo.pMultisampleState = &multisampleState;
     createInfo.pDepthStencilState = NULL;
-    // createInfo.pColorBlendState;
-    // createInfo.pDynamicState;
-    // createInfo.layout;
-    // createInfo.renderPass;
-    // createInfo.subpass;
-    // createInfo.basePipelineHandle;
-    // createInfo.basePipelineIndex;
+    createInfo.pColorBlendState = &colorBlendState;
+    createInfo.pDynamicState = &dynamicState;
+    createInfo.layout = pApplication->pipelineLayout;
+    createInfo.renderPass = pApplication->renderPass;
+    createInfo.subpass = 0;
+    createInfo.basePipelineHandle = VK_NULL_HANDLE;
+    createInfo.basePipelineIndex = -1;
 
     int result = vkCreateGraphicsPipelines(pApplication->device, VK_NULL_HANDLE, 1, &createInfo, NULL, &pApplication->pipeline);
 
-    destroyShaderModules(pApplication, pShaderModules);
+    vkDestroyShaderModule(pApplication->device, fragShaderModule, NULL);
+    vkDestroyShaderModule(pApplication->device, vertShaderModule, NULL);
 
     return (result == VK_SUCCESS) ? SUCCESS : FAIL;
 }
